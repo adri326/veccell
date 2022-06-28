@@ -6,7 +6,7 @@
 //! You would use this crate if:
 //! - You need a `Vec` with [interior mutability](std::cell#when-to-choose-interior-mutability)
 //! - You only want mutable access to one element at a time
-//! - You want immutable access to all other elements while an element is borrowed
+//! - You want immutable access to all other elements while an element is borrowed mutably
 //! - You need a constant memory cost
 //!
 //! You would need something else if:
@@ -1155,3 +1155,7 @@ mod test {
         std::mem::drop(y);
     }
 }
+
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;

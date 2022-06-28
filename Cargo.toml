@@ -2,7 +2,11 @@
 name = "veccell"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = [ "Shad Amethyst <adrien.burgun@orange.fr>" ]
+description = "Provides VecCell, a variant of Vec with interior mutability."
+repository = "https://github.com/adri326/veccell/"
+license = "MIT OR Apache-2.0"
+keywords = ["vec", "refcell", "interior-mutability"]
+categories = ["rust-patterns"]
 
 [dependencies]
