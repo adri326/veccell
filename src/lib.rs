@@ -6,12 +6,14 @@
 //! You would use this crate if:
 //! - You need a `Vec` with [interior mutability](std::cell#when-to-choose-interior-mutability)
 //! - You only want mutable access to one element at a time
+//! - You want immutable access to all other elements while an element is borrowed
 //! - You need a constant memory cost
 //!
-//! You wouldn't need this crate if:
-//! - You don't need interior mutability (use `Vec<T>`)
-//! - You want mutable access to multiple elements at a time (use `Vec<RefCell<T>>`)
-//! - You need to share the array across multiple threads (use `Vec<Mutex<T>>` or `Arc<Vec<Mutex<T>>>`)
+//! You would need something else if:
+//! - You don't need interior mutability *(you may use `Vec<T>` instead)*
+//! - While an element is borrowed mutably, you don't need to access the others *(you may use `RefCell<Vec<T>>` instead)*
+//! - You want mutable access to multiple elements at a time *(you may use `Vec<RefCell<T>>` instead)*
+//! - You need to share the array across multiple threads *(you may use `Vec<Mutex<T>>` or `Arc<Vec<Mutex<T>>>` instead)*
 
 #![feature(type_alias_impl_trait)]
 
@@ -25,14 +27,15 @@ use std::ops::{Deref, DerefMut};
 /// New mutable references may only be created if there are no active mutable *or immutable* references.
 /// New immutable references may only be created for indices that aren't mutably borrowed.
 ///
-/// - To borrow an item immutably, use [`VecCell::get`].
-/// - To borrow an item mutably, use [`VecCell::borrow_mut`].
-/// - If you have a mutable reference to the `VecCell`, then you may also use [`VecCell::get_mut`].
-/// - You may access the internal `Vec<UnsafeCell<T>>` using [`VecCell::inner`] and [`VecCell::inner_mut`].
+/// - To borrow an item immutably, use [`get()`](VecCell::get).
+/// - To borrow an item mutably, use [`borrow_mut()`](VecCell::borrow_mut).
+/// - If you have a mutable reference to the `VecCell`, then you may also use [`get_mut()`](VecCell::get_mut).
+/// - You may access the internal `Vec<UnsafeCell<T>>` using [`inner()`](VecCell::inner) and [`inner_mut()`](VecCell::inner_mut).
+/// - To read the number of borrows, use [`borrows()`](VecCell::borrows) and [`mut_borrow()`](VecCell::mut_borrow)
 ///
 /// This type is essentially a more restricted version of `Vec<RefCell<T>>`,
 /// with the benefit of having a lower memory footprint since we only need
-/// `sizeof!(usize)+sizeof!(Option<usize>)` bytes instead of `N*sizeof!(usize)` bytes of memory to prevent aliasing.
+/// `sizeof!(usize) + sizeof!(Option<usize>)` bytes instead of `N*sizeof!(usize)` bytes of memory to prevent aliasing.
 ///
 /// # Examples
 ///
@@ -81,7 +84,7 @@ pub struct VecCell<T> {
 }
 
 impl<T> VecCell<T> {
-    /// Creates a new `VecCell`.
+    /// Creates a new, empty `VecCell`.
     pub fn new() -> Self {
         Self {
             mut_borrow: Cell::new(None),
@@ -90,7 +93,7 @@ impl<T> VecCell<T> {
         }
     }
 
-    /// Creates a new `VecCell` with `capacity` as capacity.
+    /// Creates a new, empty `VecCell` with `capacity` as capacity.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             mut_borrow: Cell::new(None),
@@ -99,15 +102,26 @@ impl<T> VecCell<T> {
         }
     }
 
-    /// Returns the raw parts of a `VecCell` in the format `(inner_vec, mut_borrow, borrows)`.
-    /// If no reference was [forgotten](std::mem::forget), then `mut_borrow == None` and `borrows == 0`.
-    pub fn into_raw_parts(self) -> (Vec<UnsafeCell<T>>, Option<usize>, usize) {
-        (self.inner, self.mut_borrow.into_inner(), self.borrows.into_inner())
-    }
-
     /// Returns the length of the `VecCell`, ie. the number of elements in the array.
     ///
     /// See [`Vec::len()`] for more information.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    /// assert_eq!(vec.len(), 0); // There are no elements
+    ///
+    /// vec.push(32);
+    /// assert_eq!(vec.len(), 1); // There is one element: [32]
+    ///
+    /// vec.push(64);
+    /// assert_eq!(vec.len(), 2); // There are two elements: [32, 64]
+    ///
+    /// vec.push(64);
+    /// assert_eq!(vec.len(), 3); // There are three elements: [32, 64, 64]
+    /// ```
     #[inline]
     pub fn len(&self) -> usize {
         self.inner.len()
@@ -137,6 +151,23 @@ impl<T> VecCell<T> {
     /// # Panics
     ///
     /// Panics if `index >= self.len()`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(4);
+    /// vec.push(6);
+    /// vec.push(8);
+    /// vec.push(10);
+    /// vec.push(12);
+    ///
+    /// vec.remove(0);
+    ///
+    /// assert_eq!(vec, vec![6, 8, 10, 12]);
+    /// ```
     #[inline]
     pub fn remove(&mut self, index: usize) -> T {
         self.inner.remove(index).into_inner()
@@ -149,6 +180,23 @@ impl<T> VecCell<T> {
     /// # Panics
     ///
     /// Panics if `index >= self.len()`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(4);
+    /// vec.push(6);
+    /// vec.push(8);
+    /// vec.push(10);
+    /// vec.push(12);
+    ///
+    /// vec.swap_remove(0);
+    ///
+    /// assert_eq!(vec, vec![12, 6, 8, 10]);
+    /// ```
     #[inline]
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.inner.swap_remove(index).into_inner()
@@ -160,19 +208,19 @@ impl<T> VecCell<T> {
     ///
     /// ```
     /// # use veccell::*;
-    /// let mut vec: VecCell<usize> = VecCell::new(0);
+    /// let mut vec: VecCell<usize> = VecCell::new();
     ///
     /// vec.push(2);
     /// vec.push(5);
     /// vec.push(9);
     ///
     /// // There are no borrows at this point
-    /// assert_eq!(x.borrows(), 0);
+    /// assert_eq!(vec.borrows(), 0);
     ///
     /// let x = vec.get(1);
     ///
     /// // There is exactly one borrow at this point
-    /// assert_eq!(x.borrows(), 1);
+    /// assert_eq!(vec.borrows(), 1);
     ///
     /// std::mem::drop(x); // x lives up to here
     /// ```
@@ -186,19 +234,19 @@ impl<T> VecCell<T> {
     ///
     /// ```
     /// # use veccell::*;
-    /// let mut vec: VecCell<usize> = VecCell::new(0);
+    /// let mut vec: VecCell<usize> = VecCell::new();
     ///
     /// vec.push(2);
     /// vec.push(5);
     /// vec.push(9);
     ///
     /// // There is no mutable borrow at this point
-    /// assert_eq!(x.mut_borrow(), None);
+    /// assert_eq!(vec.mut_borrow(), None);
     ///
-    /// let x = vec.get_mut(2);
+    /// let x = vec.borrow_mut(2);
     ///
     /// // There is a mutable borrow of element 2 at this point
-    /// assert_eq!(x.mut_borrow(), Some(2));
+    /// assert_eq!(vec.mut_borrow(), Some(2));
     ///
     /// std::mem::drop(x); // x lives up to here
     /// ```
@@ -206,54 +254,271 @@ impl<T> VecCell<T> {
         self.mut_borrow.get()
     }
 
+    /// Pushes a value at the end of the array.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use veccell::VecCell;
+    ///
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    /// assert_eq!(vec.len(), 0);
+    ///
+    /// vec.push(32);
+    /// assert_eq!(vec.len(), 1);
+    /// assert_eq!(vec.get(0).unwrap(), 32);
+    ///
+    /// vec.push(127);
+    /// assert_eq!(vec.len(), 2);
+    /// assert_eq!(vec.get(1).unwrap(), 127);
+    /// ```
     pub fn push(&mut self, value: T) {
         self.inner.push(UnsafeCell::new(value));
     }
 
+    /// Pops the last value of the array, if any.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    ///
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(7);
+    /// vec.push(15);
+    /// vec.push(31);
+    ///
+    /// assert_eq!(vec.pop(), Some(31));
+    /// assert_eq!(vec.len(), 2);
+    ///
+    /// assert_eq!(vec.pop(), Some(15));
+    /// assert_eq!(vec.len(), 1);
+    /// ```
     pub fn pop(&mut self) -> Option<T> {
         self.inner.pop().map(UnsafeCell::into_inner)
     }
 
+    /// Borrows the `index`-th element immutably, if it exists and isn't already mutably borrowed.
+    /// Returns `None` otherwise.
+    ///
+    /// To prevent aliasing, this function returns `None` if `self.mut_borrow() == Some(index)`.
+    /// Otherwise, it returns `Some(VecRef(reference))` to make sure that the immutable borrow is well-tracked.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(1);
+    /// vec.push(2);
+    /// vec.push(3);
+    ///
+    /// let x = vec.get(1).unwrap();
+    ///
+    /// assert_eq!(*x, 2);
+    ///
+    /// let y = vec.get(1).unwrap();
+    ///
+    /// assert_eq!(x, y);
+    ///
+    /// // Manual drops for demonstration purposes
+    /// std::mem::drop(x);
+    /// std::mem::drop(y);
+    /// ```
     pub fn get<'b>(&'b self, index: usize) -> Option<VecRef<'b, T>> {
         VecRef::new(self, index)
     }
 
+    /// Borrows the `index`-th element mutably, if it exists and no mutable *or immutable* borrow are active.
+    /// Returns `None` otherwise.
+    ///
+    /// To prevent aliasing, this function only returns `Some(VecRefMut(reference))` if `self.mut_borrow() == None` and `self.borrows() == 0`.
+    /// The [`VecRefMut`] object sets `self.mut_borrow` to `Some(index)` and clears this field once it is dropped.
+    ///
+    /// If you need to borrow an element mutably and borrow another element immutably, then you must *first* borrow it mutably, then borrow it immutably.
+    /// Otherwise, `borrow_mut` will not have the guarantee that its element isn't already being borrowed.
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(1);
+    /// vec.push(2);
+    /// vec.push(3);
+    ///
+    /// let mut x = vec.borrow_mut(1).unwrap();
+    /// let y = vec.get(2).unwrap();
+    ///
+    /// *x = *y;
+    ///
+    /// // Manual drops for demonstration purposes
+    /// std::mem::drop(x);
+    /// std::mem::drop(y);
+    ///
+    /// assert_eq!(vec.get(1).unwrap(), 3);
+    /// ```
     pub fn borrow_mut<'b>(&'b self, index: usize) -> Option<VecRefMut<'b, T>> {
         VecRefMut::new(self, index)
     }
 
-    // TODO: reborrow_mut?
+    // TODO: reborrow_mut? To extend a mutable borrow without needing to check anything?
 
+    /// Returns a mutable reference to the `index`-th element, if it exists.
+    /// Requires exclusive access to `self` (guaranteed by `&mut self`).
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(1);
+    /// vec.push(2);
+    /// vec.push(3);
+    ///
+    /// let x = vec.get_mut(1).unwrap();
+    /// *x = 5;
+    ///
+    /// assert_eq!(vec.get(1).unwrap(), 5);
+    /// ```
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         self.inner.get_mut(index).map(UnsafeCell::get_mut)
     }
 
+    // TODO: implement Drop on the iterator? This way the panic can be more thorough
+
+    /// Returns an iterator of immutable borrows ([`VecRef`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if an element was mutably borrowed when the iterator yields it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(0);
+    /// vec.push(1);
+    /// vec.push(2);
+    /// vec.push(3);
+    ///
+    /// for (index, guard) in vec.iter().enumerate() {
+    ///     assert_eq!(index, *guard);
+    /// }
+    /// ```
     pub fn iter<'b>(&'b self) -> impl Iterator<Item = VecRef<'b, T>> {
         self.into_iter()
     }
 
+    /// Returns an iterator of mutable references.
+    /// Requires exclusive access to `self` (guaranteed by `&mut self`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(0);
+    /// vec.push(1);
+    /// vec.push(2);
+    /// vec.push(3);
+    ///
+    /// for x in vec.iter_mut() {
+    ///     *x += 1;
+    /// }
+    ///
+    /// assert_eq!(vec, vec![1, 2, 3, 4]);
+    /// ```
     pub fn iter_mut<'b>(&'b mut self) -> impl Iterator<Item = &'b mut T> {
         self.inner.iter_mut().map(UnsafeCell::get_mut)
     }
 
+    /// Returns an iterator of immutable borrows ([`VecRef`]).
+    /// Yields `None` for any element that was mutably borrowed when the iterator tried to yield it.
+    ///
+    /// Equivalent to calling `(0..self.len()).map(VecCell::get)`.
+    /// Can be used in conjunction with [`Iterator::flatten()`] and [`<Option as IntoIterator>`](std::option::Option#impl-IntoIterator)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(0);
+    /// vec.push(1);
+    /// vec.push(2);
+    /// vec.push(3);
+    ///
+    /// let x = vec.borrow_mut(1);
+    ///
+    /// let vec2: Vec<_> = vec.try_iter().flatten().map(|x| *x).collect();
+    /// assert_eq!(vec2, vec![0, 2, 3]); // Element 1 was skipped, as it was mutably borrowed
+    ///
+    /// // Manual drop for demonstration purposes
+    /// std::mem::drop(x);
+    /// ```
     pub fn try_iter<'b>(&'b self) -> impl Iterator<Item = Option<VecRef<'b, T>>> {
         (0..self.len()).map(|index| {
             self.get(index)
         })
     }
 
-    /// Returns a reference to the inner buffer.
-    /// You may safely perform immutable operations on it.
+    /// Resets the [`borrows`](VecCell::borrows) and [`mut_borrow`](VecCell::mut_borrow) counters.
+    /// Useful if a [`VecRef`] or [`VecRefMut`] was [forgotten without `Drop`ping it](std::mem::forget).
+    ///
+    /// Requires exclusive access to `self` (guaranteed by `&mut self`).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(0);
+    /// vec.push(1);
+    /// vec.push(2);
+    ///
+    /// let x = vec.borrow_mut(1);
+    /// let y = vec.get(2);
+    ///
+    /// std::mem::forget(x);
+    /// std::mem::forget(y);
+    ///
+    /// assert_eq!(vec.mut_borrow(), Some(1));
+    /// assert_eq!(vec.borrows(), 1);
+    ///
+    /// vec.undo_leak();
+    ///
+    /// assert_eq!(vec.mut_borrow(), None);
+    /// assert_eq!(vec.borrows(), 0);
+    /// ```
+    pub fn undo_leak(&mut self) {
+        self.borrows.set(0);
+        self.mut_borrow.set(None);
+    }
+
+    /// Returns a reference to the inner buffer, on which you may safely perform immutable operations.
     #[inline]
     pub fn inner(&self) -> &Vec<UnsafeCell<T>> {
         &self.inner
     }
 
-    /// Returns a mutable reference to the inner buffer.
-    /// You may safely perform mutable operations on it.
+    /// Returns a mutable reference to the inner buffer, on which you may safely perform mutable operations.
+    /// Requires exclusive access to `self` (guaranteed by `&mut self`).
     #[inline]
     pub fn inner_mut(&mut self) -> &mut Vec<UnsafeCell<T>> {
         &mut self.inner
+    }
+
+    /// Returns the raw parts of a `VecCell` in the format `(inner_vec, mut_borrow, borrows)`.
+    /// If no reference was [forgotten](std::mem::forget), then `mut_borrow == None` and `borrows == 0`.
+    #[inline]
+    pub fn into_raw_parts(self) -> (Vec<UnsafeCell<T>>, Option<usize>, usize) {
+        (self.inner, self.mut_borrow.into_inner(), self.borrows.into_inner())
     }
 
     // == Unsafe functions section ==
@@ -444,10 +709,49 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
         })
     }
 
+    /// Returns a reference to the borrowed value.
+    /// The reference may not outlive this `VecRef` instance.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<String> = VecCell::new();
+    ///
+    /// vec.push(String::from("hello"));
+    /// vec.push(String::from("world"));
+    ///
+    /// let guard = vec.get(0).unwrap();
+    /// assert_eq!(guard.get(), "hello");
+    /// ```
     pub fn get(&self) -> &T {
         &*self.value
     }
 
+    /// Transforms a `VecRef<'_, T>` into a `VecRef<'_, U>` from a function that maps `&T` to `&U`.
+    ///
+    /// This function does not use `self` and must be called explicitly via `VecRef::map(value, function)`.
+    ///
+    /// # Examples
+    ///
+    /// This function comes in hand when you need to return a reference to a value in a [`VecCell`] from within a function/scope.
+    /// For instance, the following is disallowed:
+    ///
+    /// ```compile_fail
+    /// # use veccell::*;
+    /// fn return_favorite_value<'a>(array: &'a VecCell<Vec<u8>>) -> &'a u8 {
+    ///     &array.get(42).unwrap().get()[7]
+    /// }
+    /// ```
+    ///
+    /// Instead, you would write it as follows:
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// fn return_favorite_value<'a>(array: &'a VecCell<Vec<u8>>) -> VecRef<'a, u8> {
+    ///     VecRef::map(array.get(42).unwrap(), |vec| &vec[7])
+    /// }
+    /// ```
     pub fn map<'b, U: ?Sized, F>(original: VecRef<'b, T>, f: F) -> VecRef<'b, U>
     where
         F: FnOnce(&T) -> &U
@@ -537,10 +841,42 @@ impl<'a, T: ?Sized> VecRefMut<'a, T> {
         })
     }
 
+    /// Returns an immutable reference to the borrowed value.
+    /// The reference may not outlive this `VecRefMut` instance.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<String> = VecCell::new();
+    ///
+    /// vec.push(String::from("hello"));
+    /// vec.push(String::from("world"));
+    ///
+    /// let guard = vec.borrow_mut(0).unwrap();
+    /// assert_eq!(guard.get(), "hello");
+    /// ```
     pub fn get(&self) -> &T {
         &*self.value
     }
 
+    /// Returns a mutable reference to the borrowed value.
+    /// The reference may not outlive this `VecRefMut` instance.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<String> = VecCell::new();
+    ///
+    /// vec.push(String::from("hello"));
+    /// vec.push(String::from("world"));
+    ///
+    /// let mut guard = vec.borrow_mut(0).unwrap();
+    /// let hello = std::mem::replace(guard.get_mut(), String::from("potato"));
+    /// assert_eq!(guard.get(), "potato");
+    /// assert_eq!(hello, "hello");
+    /// ```
     pub fn get_mut(&mut self) -> &mut T {
         &mut *self.value
     }
