@@ -20,7 +20,7 @@ use std::fmt::{self, Debug};
 use std::ops::{Deref, DerefMut};
 
 mod vecref;
-pub use vecref::VecRef;
+pub use vecref::{VecRef, VecRange, VecRangeIter};
 
 mod vecrefmut;
 pub use vecrefmut::VecRefMut;
@@ -333,6 +333,28 @@ impl<T> VecCell<T> {
     /// ```
     pub fn get<'b>(&'b self, index: usize) -> Option<VecRef<'b, T>> {
         VecRef::new(self, index)
+    }
+
+    /// Borrows a range of elements, making sure that none of these elements are borrowed mutably already.
+    /// Returns `Some(VecRef(slice))` on success.
+    /// Returns `None` otherwise.
+    ///
+    /// To prevent aliasing, this function returns `None` if `self.mut_borrow().is_some()` and `self.mut_borrow().unwrap() ∈ range`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(1);
+    /// vec.push(2);
+    /// vec.push(3);
+    ///
+    /// let s = vec.get_range(0..2); // Gets elements 0 and 1
+    /// ```
+    pub fn get_range<'b, R: std::ops::RangeBounds<usize>>(&'b self, range: R) -> Option<VecRange<'b, T>> {
+        VecRange::new(self, range)
     }
 
     /// Borrows the `index`-th element mutably, if it exists and no mutable *or immutable* borrow are active.
