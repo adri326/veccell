@@ -15,8 +15,6 @@
 //! - You want mutable access to multiple elements at a time *(you may use `Vec<RefCell<T>>` instead)*
 //! - You need to share the array across multiple threads *(you may use `Vec<Mutex<T>>` or `Arc<Vec<Mutex<T>>>` instead)*
 
-#![feature(type_alias_impl_trait)]
-
 use std::cell::{Cell, UnsafeCell};
 use std::fmt::{self, Debug};
 use std::ops::{Deref, DerefMut};
@@ -582,30 +580,68 @@ impl<T: fmt::Debug> fmt::Debug for VecCell<T> {
 
 impl<'a, T: 'a> IntoIterator for &'a VecCell<T> {
     type Item = VecRef<'a, T>;
-    type IntoIter = impl Iterator<Item = Self::Item>;
+    type IntoIter = VecCellRefIter<'a, T>;
 
     /// # Panics
     ///
     /// Panics if a value is currently mutably borrowed
     fn into_iter(self) -> Self::IntoIter {
-        (0..self.len()).map(|index| {
-            match self.get(index) {
-                Some(x) => x,
-                None => panic!("Error while borrowing immutably element {} of VecCell: already mutably borrowed", index),
-            }
-        })
+        VecCellRefIter {
+            vec: self,
+            index: 0
+        }
+    }
+}
+
+// TODO: remove once https://github.com/rust-lang/rust/issues/63063 is merged
+#[derive(Clone)]
+pub struct VecCellRefIter<'a, T> {
+    vec: &'a VecCell<T>,
+    index: usize
+}
+
+impl<'a, T> Iterator for VecCellRefIter<'a, T> {
+    type Item = VecRef<'a, T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.vec.len() {
+            return None
+        }
+
+        let res = match self.vec.get(self.index) {
+            Some(x) => x,
+            None => panic!("Error while borrowing immutably element {} of VecCell: already mutably borrowed", self.index),
+        };
+        self.index += 1;
+
+        Some(res)
     }
 }
 
 impl<T> IntoIterator for VecCell<T> {
     type Item = T;
-    type IntoIter = impl Iterator<Item = Self::Item>;
+    type IntoIter = VecCellIntoIter<T>;
 
     /// # Panics
     ///
     /// Panics if a value is currently mutably borrowed
     fn into_iter(self) -> Self::IntoIter {
-        self.inner.into_iter().map(|x| x.into_inner())
+        VecCellIntoIter {
+            iter: self.inner.into_iter()
+        }
+    }
+}
+
+// TODO: remove once https://github.com/rust-lang/rust/issues/63063 is merged
+pub struct VecCellIntoIter<T> {
+    iter: std::vec::IntoIter<UnsafeCell<T>>,
+}
+
+impl<T> Iterator for VecCellIntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|x| x.into_inner())
     }
 }
 
@@ -803,9 +839,12 @@ impl<'a, T: ?Sized> Clone for VecRef<'a, T> {
     }
 }
 
+// Lets us safely destructure VecRefMut while implementing the Drop logic
+struct VecRefMutBorrow<'a>(&'a Cell<Option<usize>>);
+
 /// Wraps a mutably borrowed value from a [`VecCell`].
 pub struct VecRefMut<'a, T: ?Sized> {
-    mut_borrow: &'a Cell<Option<usize>>,
+    mut_borrow: VecRefMutBorrow<'a>,
     value: &'a mut T,
 }
 
@@ -834,7 +873,7 @@ impl<'a, T: ?Sized> VecRefMut<'a, T> {
         vec.mut_borrow.set(Some(index));
 
         Some(Self {
-            mut_borrow: &vec.mut_borrow,
+            mut_borrow: VecRefMutBorrow(&vec.mut_borrow),
             value: unsafe {
                 vec.get_mut_unchecked(index)
             }
@@ -881,16 +920,28 @@ impl<'a, T: ?Sized> VecRefMut<'a, T> {
         &mut *self.value
     }
 
-    // pub fn map<'b, U: ?Sized, F>(original: VecRefMut<'b, T>, f: F) -> VecRefMut<'b, U>
-    // where
-    //     F: FnOnce(&mut T) -> &mut U
-    // {
-    //     let VecRefMut { value, mut_borrow } = original;
-    //     VecRefMut {
-    //         value: f(value),
-    //         mut_borrow
-    //     }
-    // }
+    /// Transforms a `VecRefMut<'_, T>` into a `VecRefMut<'_, U>` from a function that maps `&mut T` to `&mut U`.
+    ///
+    /// This function does not use `self` and must be called explicitly via `VecRefMut::map(value, function)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// fn return_favorite_value_mut<'a>(array: &'a VecCell<Vec<u8>>) -> VecRefMut<'a, u8> {
+    ///     VecRefMut::map(array.borrow_mut(42).unwrap(), |vec| &mut vec[7])
+    /// }
+    /// ```
+    pub fn map<'b, U: ?Sized, F>(original: VecRefMut<'b, T>, f: F) -> VecRefMut<'b, U>
+    where
+        F: FnOnce(&mut T) -> &mut U
+    {
+        let VecRefMut { value, mut_borrow } = original;
+        VecRefMut {
+            value: f(value),
+            mut_borrow
+        }
+    }
 }
 
 impl<'a, T: ?Sized> Deref for VecRefMut<'a, T> {
@@ -909,11 +960,11 @@ impl<'a, T: ?Sized> DerefMut for VecRefMut<'a, T> {
     }
 }
 
-impl<'a, T: ?Sized> Drop for VecRefMut<'a, T> {
+impl<'a> Drop for VecRefMutBorrow<'a> {
     #[inline]
     fn drop(&mut self) {
-        debug_assert!(self.mut_borrow.get().is_some());
-        self.mut_borrow.set(None);
+        debug_assert!(self.0.get().is_some());
+        self.0.set(None);
     }
 }
 

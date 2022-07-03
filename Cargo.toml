@@ -1,6 +1,6 @@
 [package]
 name = "veccell"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = [ "Shad Amethyst <adrien.burgun@orange.fr>" ]
 description = "Provides VecCell, a variant of Vec with interior mutability."
