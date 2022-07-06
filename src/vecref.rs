@@ -48,6 +48,8 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
     }
 
     /// Returns a reference to the borrowed value.
+    /// Equivalent to `&*vec_ref`.
+    ///
     /// The reference may not outlive this `VecRef` instance.
     ///
     /// # Example
@@ -59,7 +61,7 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
     /// vec.push(String::from("hello"));
     /// vec.push(String::from("world"));
     ///
-    /// let guard = vec.get(0).unwrap();
+    /// let guard = vec.borrow(0).unwrap();
     /// assert_eq!(guard.get(), "hello");
     /// ```
     pub fn get(&self) -> &T {
@@ -87,7 +89,7 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
     /// ```
     /// # use veccell::*;
     /// fn return_favorite_value<'a>(array: &'a VecCell<Vec<u8>>) -> VecRef<'a, u8> {
-    ///     VecRef::map(array.get(42).unwrap(), |vec| &vec[7])
+    ///     VecRef::map(array.borrow(42).unwrap(), |vec| &vec[7])
     /// }
     /// ```
     pub fn map<'b, U: ?Sized, F>(original: VecRef<'b, T>, f: F) -> VecRef<'b, U>
@@ -222,6 +224,7 @@ impl<'a, T> VecRange<'a, T> {
     }
 }
 
+// TODO: use std::mem::transmute to implement From<VecRange<'a, T>> for VecRef<'a, [T]>?
 impl<'a, T> From<VecRange<'a, T>> for VecRef<'a, [UnsafeCell<T>]> {
     fn from(range: VecRange<'a, T>) -> Self {
         Self {

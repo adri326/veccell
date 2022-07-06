@@ -66,14 +66,14 @@ fn test_borrow() {
 
     let mut x = vec.borrow_mut(1).unwrap();
 
-    assert_eq!(vec.get(0).unwrap(), 1);
-    assert_eq!(vec.get(1), None);
+    assert_eq!(vec.borrow(0).unwrap(), 1);
+    assert_eq!(vec.borrow(1), None);
 
     *x = 3;
 
     std::mem::drop(x);
 
-    assert_eq!(vec.get(1).unwrap(), 3);
+    assert_eq!(vec.borrow(1).unwrap(), 3);
 }
 
 #[test]
@@ -90,8 +90,8 @@ fn test_double_borrow() {
     assert!(vec.borrow_mut(1).is_none());
     assert_eq!(vec.mut_borrow(), Some(1));
 
-    assert_eq!(vec.get(0).unwrap(), 1);
-    assert_eq!(vec.get(1), None);
+    assert_eq!(vec.borrow(0).unwrap(), 1);
+    assert_eq!(vec.borrow(1), None);
 
     *x = 3;
 
@@ -99,19 +99,19 @@ fn test_double_borrow() {
     std::mem::drop(y);
 
     assert_eq!(vec.mut_borrow(), None);
-    assert_eq!(vec.get(1).unwrap(), 3);
+    assert_eq!(vec.borrow(1).unwrap(), 3);
 }
 
 #[test]
 fn test_out_of_bounds() {
     let mut vec: VecCell<usize> = VecCell::new();
 
-    assert!(vec.get(0).is_none());
+    assert!(vec.borrow(0).is_none());
 
     vec.push(1);
 
-    assert!(vec.get(0).is_some());
-    assert!(vec.get(1).is_none());
+    assert!(vec.borrow(0).is_some());
+    assert!(vec.borrow(1).is_none());
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn test_borrow_clone() {
     vec.push(1);
     vec.push(2);
 
-    let x = vec.get(0);
+    let x = vec.borrow(0);
     assert_eq!(vec.borrows(), 1);
     assert_eq!(vec.borrows(), 1);
     assert_eq!(vec.mut_borrow(), None);
@@ -139,9 +139,9 @@ fn test_borrow_clone() {
     std::mem::drop(y);
     assert_eq!(vec.borrows(), 0);
 
-    let x = vec.get(0);
+    let x = vec.borrow(0);
     assert_eq!(vec.borrows(), 1);
-    let y = vec.get(0);
+    let y = vec.borrow(0);
     assert_eq!(vec.borrows(), 2);
     let z = x.clone();
     assert_eq!(vec.borrows(), 3);
@@ -161,7 +161,7 @@ fn test_borrow_mut() {
     vec.push(1);
     vec.push(2);
 
-    let x = vec.get(0);
+    let x = vec.borrow(0);
     assert!(x.is_some());
 
     let y = vec.borrow_mut(0);

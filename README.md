@@ -7,7 +7,7 @@ You would use this crate if:
 - You need a `Vec` with interior mutability
 - You only want mutable access to one element at a time
 - You want immutable access to all other elements while an element is borrowed mutably
-- You need a constant memory cost
+- You need a constant memory cost for the aliasing checks
 
 You would need something else if:
 
@@ -39,14 +39,14 @@ arr.push(48);
 arr.push(2);
 
 let mut third = arr.borrow_mut(2).unwrap(); // Borrow the third element mutably
-let first = arr.get(0).unwrap(); // Borrow the first element immutably
+let first = arr.borrow(0).unwrap(); // Borrow the first element immutably
 
 *third *= *first; // Multiply the third element by the first element
 
 println!("{}", third.get()); // Prints 64
 std::mem::drop(third); // Drop the mutable borrow
 
-println!("{}", arr.get(2).unwrap().get()); // Also prints 64
+println!("{}", arr.borrow(2).unwrap().get()); // Also prints 64
 ```
 
 However, to prevent aliasing, while an element is borrowed mutably, it cannot be borrowed immutably:
@@ -62,9 +62,9 @@ arr.push(8);
 
 let mut third = arr.borrow_mut(2).unwrap(); // Borrow the third element mutably
 
-// Here, arr.get(2) returns None,
+// Here, arr.borrow(2) returns None,
 // because the third element is already borrowed mutably.
-let third2 = arr.get(2);
+let third2 = arr.borrow(2);
 
 assert!(third2.is_none());
 
@@ -89,7 +89,7 @@ arr.push(32);
 arr.push(48);
 arr.push(8);
 
-let second = arr.get(1).unwrap();
+let second = arr.borrow(1).unwrap();
 
 let third = arr.borrow_mut(2);
 

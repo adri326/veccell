@@ -31,7 +31,7 @@ pub use vecrefmut::VecRefMut;
 /// New mutable references may only be created if there are no active mutable *or immutable* references.
 /// New immutable references may only be created for indices that aren't mutably borrowed.
 ///
-/// - To borrow an item immutably, use [`get()`](VecCell::get).
+/// - To borrow an item immutably, use [`borrow()`](VecCell::borrow).
 /// - To borrow an item mutably, use [`borrow_mut()`](VecCell::borrow_mut).
 /// - If you have a mutable reference to the `VecCell`, then you may also use [`get_mut()`](VecCell::get_mut).
 /// - You may access the internal `Vec<UnsafeCell<T>>` using [`inner()`](VecCell::inner) and [`inner_mut()`](VecCell::inner_mut).
@@ -62,7 +62,7 @@ pub use vecrefmut::VecRefMut;
 ///     // Get a mutable reference *then* an immutable reference
 ///     // (would fail if the order was reversed)
 ///     let mut current = vec.borrow_mut(index).unwrap();
-///     let prev = vec.get(index - 1).unwrap();
+///     let prev = vec.borrow(index - 1).unwrap();
 ///
 ///     // Give both references to update
 ///     update(current.get_mut(), prev.get());
@@ -221,7 +221,7 @@ impl<T> VecCell<T> {
     /// // There are no borrows at this point
     /// assert_eq!(vec.borrows(), 0);
     ///
-    /// let x = vec.get(1);
+    /// let x = vec.borrow(1);
     ///
     /// // There is exactly one borrow at this point
     /// assert_eq!(vec.borrows(), 1);
@@ -270,11 +270,11 @@ impl<T> VecCell<T> {
     ///
     /// vec.push(32);
     /// assert_eq!(vec.len(), 1);
-    /// assert_eq!(vec.get(0).unwrap(), 32);
+    /// assert_eq!(vec.borrow(0).unwrap(), 32);
     ///
     /// vec.push(127);
     /// assert_eq!(vec.len(), 2);
-    /// assert_eq!(vec.get(1).unwrap(), 127);
+    /// assert_eq!(vec.borrow(1).unwrap(), 127);
     /// ```
     pub fn push(&mut self, value: T) {
         self.inner.push(UnsafeCell::new(value));
@@ -319,11 +319,11 @@ impl<T> VecCell<T> {
     /// vec.push(2);
     /// vec.push(3);
     ///
-    /// let x = vec.get(1).unwrap();
+    /// let x = vec.borrow(1).unwrap();
     ///
     /// assert_eq!(*x, 2);
     ///
-    /// let y = vec.get(1).unwrap();
+    /// let y = vec.borrow(1).unwrap();
     ///
     /// assert_eq!(x, y);
     ///
@@ -331,7 +331,7 @@ impl<T> VecCell<T> {
     /// std::mem::drop(x);
     /// std::mem::drop(y);
     /// ```
-    pub fn get<'b>(&'b self, index: usize) -> Option<VecRef<'b, T>> {
+    pub fn borrow<'b>(&'b self, index: usize) -> Option<VecRef<'b, T>> {
         VecRef::new(self, index)
     }
 
@@ -351,7 +351,7 @@ impl<T> VecCell<T> {
     /// vec.push(2);
     /// vec.push(3);
     ///
-    /// let s = vec.borrow_range(0..2); // Gets elements 0 and 1
+    /// let s = vec.borrow_range(0..2).unwrap(); // Gets elements 0 and 1
     /// ```
     pub fn borrow_range<'b, R: std::ops::RangeBounds<usize>>(&'b self, range: R) -> Option<VecRange<'b, T>> {
         VecRange::new(self, range)
@@ -375,7 +375,7 @@ impl<T> VecCell<T> {
     /// vec.push(3);
     ///
     /// let mut x = vec.borrow_mut(1).unwrap();
-    /// let y = vec.get(2).unwrap();
+    /// let y = vec.borrow(2).unwrap();
     ///
     /// *x = *y;
     ///
@@ -383,7 +383,7 @@ impl<T> VecCell<T> {
     /// std::mem::drop(x);
     /// std::mem::drop(y);
     ///
-    /// assert_eq!(vec.get(1).unwrap(), 3);
+    /// assert_eq!(vec.borrow(1).unwrap(), 3);
     /// ```
     pub fn borrow_mut<'b>(&'b self, index: usize) -> Option<VecRefMut<'b, T>> {
         VecRefMut::new(self, index)
@@ -405,7 +405,7 @@ impl<T> VecCell<T> {
     /// let x = vec.get_mut(1).unwrap();
     /// *x = 5;
     ///
-    /// assert_eq!(vec.get(1).unwrap(), 5);
+    /// assert_eq!(vec.borrow(1).unwrap(), 5);
     /// ```
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         self.inner.get_mut(index).map(UnsafeCell::get_mut)
@@ -489,7 +489,7 @@ impl<T> VecCell<T> {
     /// ```
     pub fn try_iter<'b>(&'b self) -> impl Iterator<Item = Option<VecRef<'b, T>>> {
         (0..self.len()).map(|index| {
-            self.get(index)
+            self.borrow(index)
         })
     }
 
@@ -509,7 +509,7 @@ impl<T> VecCell<T> {
     /// vec.push(2);
     ///
     /// let x = vec.borrow_mut(1);
-    /// let y = vec.get(2);
+    /// let y = vec.borrow(2);
     ///
     /// std::mem::forget(x);
     /// std::mem::forget(y);
@@ -622,6 +622,7 @@ impl<'a, T: 'a> IntoIterator for &'a VecCell<T> {
 }
 
 // TODO: remove once https://github.com/rust-lang/rust/issues/63063 is merged
+/// Iterator returned by [`VecCell::iter`]
 #[derive(Clone)]
 pub struct VecCellRefIter<'a, T> {
     vec: &'a VecCell<T>,
@@ -636,7 +637,7 @@ impl<'a, T> Iterator for VecCellRefIter<'a, T> {
             return None
         }
 
-        let res = match self.vec.get(self.index) {
+        let res = match self.vec.borrow(self.index) {
             Some(x) => x,
             None => panic!("Error while borrowing immutably element {} of VecCell: already mutably borrowed", self.index),
         };
@@ -644,7 +645,29 @@ impl<'a, T> Iterator for VecCellRefIter<'a, T> {
 
         Some(res)
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.index >= self.vec.len() {
+            return (0, Some(0));
+        }
+
+        let remaining = self.vec.len() - self.index;
+
+        (remaining, Some(remaining))
+    }
 }
+
+impl<'a, T> ExactSizeIterator for VecCellRefIter<'a, T> {
+    fn len(&self) -> usize {
+        if self.index >= self.vec.len() {
+            0
+        } else {
+            self.vec.len() - self.index
+        }
+    }
+}
+
+impl<'a, T> std::iter::FusedIterator for VecCellRefIter<'a, T> {}
 
 impl<T> IntoIterator for VecCell<T> {
     type Item = T;
@@ -661,6 +684,7 @@ impl<T> IntoIterator for VecCell<T> {
 }
 
 // TODO: remove once https://github.com/rust-lang/rust/issues/63063 is merged
+/// Iterator returned by [`VecCell::into_iter`]
 pub struct VecCellIntoIter<T> {
     iter: std::vec::IntoIter<UnsafeCell<T>>,
 }
@@ -671,7 +695,19 @@ impl<T> Iterator for VecCellIntoIter<T> {
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|x| x.into_inner())
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
 }
+
+impl<T> ExactSizeIterator for VecCellIntoIter<T> {
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+}
+
+impl<T> std::iter::FusedIterator for VecCellIntoIter<T> {}
 
 impl<T: Clone> Clone for VecCell<T> {
     /// # Panics
@@ -731,6 +767,12 @@ impl<T> From<Vec<T>> for VecCell<T> {
             mut_borrow: Cell::new(None),
             borrows: Cell::new(0),
         }
+    }
+}
+
+impl<T> From<VecCell<T>> for Vec<T> {
+    fn from(veccell: VecCell<T>) -> Vec<T> {
+        veccell.into_iter().collect::<Vec<_>>()
     }
 }
 
