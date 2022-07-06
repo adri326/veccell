@@ -213,3 +213,61 @@ fn test_iter_panic() {
 
     std::mem::drop(y);
 }
+
+#[test]
+fn test_range() {
+    let mut vec: VecCell<usize> = VecCell::new();
+
+    for x in 0..10 {
+        vec.push(x);
+    }
+
+    let mut_ref = vec.borrow_mut(3);
+
+    // Check that it is impossible to reference the same element as mut_ref
+    assert!(vec.borrow_range(0..10).is_none());
+    assert!(vec.borrow_range(0..=3).is_none());
+    assert!(vec.borrow_range(0..4).is_none());
+    assert!(vec.borrow_range(3..4).is_none());
+    assert!(vec.borrow_range(3..=3).is_none());
+    assert!(vec.borrow_range(3..).is_none());
+    assert!(vec.borrow_range(0..).is_none());
+    assert!(vec.borrow_range(..4).is_none());
+    assert!(vec.borrow_range(..=4).is_none());
+
+    let range = vec.borrow_range(4..7).unwrap();
+
+    for x in 0..5 {
+        if x < 3 {
+            assert!(range.get(x).is_some());
+            assert!(range.borrow(x).is_some());
+            assert_eq!(range[x], x + 4);
+        } else {
+            assert!(range.get(x).is_none());
+            assert!(range.borrow(x).is_none());
+        }
+    }
+
+    let range = vec.borrow_range(5..).unwrap();
+
+    for x in 0..10 {
+        if x < 5 {
+            assert!(range.get(x).is_some());
+            assert!(range.borrow(x).is_some());
+            assert_eq!(range[x], x + 5);
+        } else {
+            assert!(range.get(x).is_none());
+            assert!(range.borrow(x).is_none());
+        }
+    }
+
+    let elem = vec.borrow_range(5..).unwrap().borrow(1).unwrap();
+
+    assert_eq!(*elem, 6);
+
+    std::mem::drop(mut_ref);
+
+    assert!(vec.borrow_mut(1).is_none()); // elem is still borrowed
+
+    std::mem::drop(elem);
+}

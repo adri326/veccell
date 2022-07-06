@@ -1,7 +1,12 @@
 use super::*;
 use std::ops::RangeBounds;
 
+// `'self`: lifetime of `Self`
+
 /// Wraps a borrowed reference from a [`VecCell`].
+///
+/// When an instance of `VecRef` is created, the immutable borrow counter of its parent [`VecCell`] is incremented.
+/// Once that instance is [`Drop`ped](Drop), the immutable borrow counter is decremented.
 #[derive(Clone)]
 pub struct VecRef<'a, T: ?Sized> {
     borrows: VecRefBorrow<'a>,
@@ -9,6 +14,11 @@ pub struct VecRef<'a, T: ?Sized> {
 }
 
 impl<'a, T: ?Sized> VecRef<'a, T> {
+    /// # Guarantees
+    ///
+    /// If `Some(self)` is returned, then:
+    /// - no mutable reference exist to `*self`
+    /// - `∀ t: min('a, 'self)`, no new mutable reference can be made to `*self`
     pub(crate) fn new(vec: &'a VecCell<T>, index: usize) -> Option<Self>
     where
         T: Sized
@@ -30,11 +40,11 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
         })
     }
 
-    fn from(value: &'a T, borrows: &'a Cell<usize>) -> Option<Self> {
-        Some(Self {
-            borrows: VecRefBorrow::new(borrows)?,
+    fn from(value: &'a T, borrows: VecRefBorrow<'a>) -> Self {
+        Self {
+            borrows,
             value
-        })
+        }
     }
 
     /// Returns a reference to the borrowed value.
@@ -84,7 +94,7 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
     where
         F: FnOnce(&T) -> &U
     {
-        VecRef::from(f(original.value), &original.borrows.0).expect("Error creating a new VecRef: integer overflow")
+        VecRef::from(f(original.value), original.borrows.clone())
         // original is dropped here
     }
 }
@@ -144,14 +154,18 @@ impl<'a> Drop for VecRefBorrow<'a> {
 ///
 /// # Guarantees
 ///
-/// All of the elements of the VecRange are guaranteed to be immutable.
-#[derive(Clone)]
+/// All of the elements of the VecRange are guaranteed to only be borrowed immutably.
 pub struct VecRange<'a, T> {
     borrows: VecRefBorrow<'a>,
     range: &'a [UnsafeCell<T>],
 }
 
 impl<'a, T> VecRange<'a, T> {
+    /// # Guarantees
+    ///
+    /// If `Some(self)` is returned, then:
+    /// - no mutable reference exist to `∀ x ∈ self.range`
+    /// - `∀ t ∈ min('a, 'self), ∀ x ∈ self.range`, no mutable borrow can be made to `x`
     pub(crate) fn new<R: RangeBounds<usize>>(vec: &'a VecCell<T>, range: R) -> Option<VecRange<'a, T>>
     where
         T: Sized
@@ -174,11 +188,37 @@ impl<'a, T> VecRange<'a, T> {
         })
     }
 
-    pub fn get(&self, index: usize) -> Option<&T> {
+    /// Returns an immutable reference to the `index`-th element of the slice, if it is within bounds.
+    ///
+    /// The reference may not outlive this instance of `VecRange`.
+    pub fn get<'b>(&'b self, index: usize) -> Option<&'b T> where 'a: 'b {
+        let elem = self.range.get(index)?;
         Some(unsafe {
-            // SAFETY: immutability is guaranteed by VecRange's type invariants
-            self.range.get(index)?.get().as_ref().unwrap()
+            // SAFETY: VecRange's type invariants guarantee that no mutable reference to self.range[index] exist now
+            // elem.get() is a valid pointer
+            // ('a: 'b) -> the &'b T reference cannot outlive 'a
+            // (self.borrows: VecRefBorrow<'a>) -> no new mutable reference can be made for 'b to self.range[index]
+            elem.get().as_ref().unwrap()
         })
+    }
+
+    /// Returns an immutable borrow to the `index`-th element of the slice, if it is within bounds.
+    ///
+    /// The returned [`VecRef`] increments the immutable reference counter of the parent [`VecCell`].
+    pub fn borrow(self: &VecRange<'a, T>, index: usize) -> Option<VecRef<'a, T>> {
+        let VecRange { borrows, range } = self.clone();
+        let elem = range.get(index)?;
+
+        Some(unsafe {
+            // SAFETY: VecRange's type invariants guarantee that no mutable reference to self.range[index] exist now
+            // elem.get() is a valid pointer
+            // borrows: VecRefBorrow<'a>, thus under VecRef's invariants, no access beyond 'a to elem can be made
+            VecRef::from(elem.get().as_ref().unwrap(), borrows)
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.range.len()
     }
 }
 
@@ -195,9 +235,19 @@ impl<'a, T> std::ops::Index<usize> for VecRange<'a, T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        unsafe {
-            // SAFETY: immutability is guaranteed by VecRange's type invariants
-            self.range[index].get().as_ref().unwrap()
+        match self.get(index) {
+            Some(elem) => elem,
+            None => panic!("Index out of bounds: len is {} but index is {}", self.len(), index)
+        }
+    }
+}
+
+impl<'a, T> Clone for VecRange<'a, T> {
+    /// The data pointed to by VecRange is already borrows immutably, so it can be safely cloned.
+    fn clone(&self) -> Self {
+        Self {
+            borrows: self.borrows.clone(),
+            range: self.range,
         }
     }
 }

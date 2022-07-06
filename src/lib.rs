@@ -351,9 +351,9 @@ impl<T> VecCell<T> {
     /// vec.push(2);
     /// vec.push(3);
     ///
-    /// let s = vec.get_range(0..2); // Gets elements 0 and 1
+    /// let s = vec.borrow_range(0..2); // Gets elements 0 and 1
     /// ```
-    pub fn get_range<'b, R: std::ops::RangeBounds<usize>>(&'b self, range: R) -> Option<VecRange<'b, T>> {
+    pub fn borrow_range<'b, R: std::ops::RangeBounds<usize>>(&'b self, range: R) -> Option<VecRange<'b, T>> {
         VecRange::new(self, range)
     }
 
