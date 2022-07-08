@@ -99,6 +99,17 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
         VecRef::from(f(original.value), original.borrows.clone())
         // original is dropped here
     }
+
+    /// Variant of [`VecRef::map`], where the callback (`f`) may fail.
+    ///
+    /// `f` must return a `Result`; if it returns `Ok(x)`, then `try_map` returns `Ok(VecRef(x))`.
+    /// Otherwise, it returns `Err(err)`.
+    pub fn try_map<'b, U: ?Sized, F, E>(original: VecRef<'b, T>, f: F) -> Result<VecRef<'b, U>, E>
+    where
+        F: FnOnce(&T) -> Result<&U, E>
+    {
+        Ok(VecRef::from(f(original.value)?, original.borrows.clone()))
+    }
 }
 
 impl<'a, T: ?Sized> Deref for VecRef<'a, T> {

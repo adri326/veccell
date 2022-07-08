@@ -271,3 +271,28 @@ fn test_range() {
 
     std::mem::drop(elem);
 }
+
+#[test]
+fn test_try_map() {
+    let mut vec: VecCell<Box<i32>> = VecCell::new();
+
+    for x in -10..10 {
+        vec.push(Box::new(x));
+    }
+
+    let ref_mut = vec.borrow_mut(5).unwrap();
+    assert!(VecRefMut::try_map(ref_mut, |_value| Err::<&mut (), ()>(())).is_err());
+
+    let ref_mut = vec.borrow_mut(5).unwrap();
+    let ref_mut: Result<VecRefMut<'_, i32>, ()> = VecRefMut::try_map(ref_mut, |value| Ok(value.as_mut()));
+    assert!(ref_mut.is_ok());
+    assert_eq!(ref_mut.unwrap(), -5);
+
+    let borrow = vec.borrow(6).unwrap();
+    assert!(VecRef::try_map(borrow, |_value| Err::<&(), ()>(())).is_err());
+
+    let borrow = vec.borrow(4).unwrap();
+    let borrow: Result<VecRef<'_, i32>, ()> = VecRef::try_map(borrow, |value| Ok(value.as_ref()));
+    assert!(borrow.is_ok());
+    assert_eq!(borrow.unwrap(), -6);
+}

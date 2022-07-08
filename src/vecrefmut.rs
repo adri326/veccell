@@ -103,6 +103,21 @@ impl<'a, T: ?Sized> VecRefMut<'a, T> {
             mut_borrow
         }
     }
+
+    /// Variant of [`VecRefMut::map`], where the callback (`f`) may fail.
+    ///
+    /// `f` must return a `Result`; if it returns `Ok(x)`, then `try_map` returns `Ok(VecRefMut(x))`.
+    /// Otherwise, it returns `Err(err)`.
+    pub fn try_map<'b, U: ?Sized, F, E>(original: VecRefMut<'b, T>, f: F) -> Result<VecRefMut<'b, U>, E>
+    where
+        F: FnOnce(&mut T) -> Result<&mut U, E>
+    {
+        let VecRefMut { value, mut_borrow } = original;
+        Ok(VecRefMut {
+            value: f(value)?,
+            mut_borrow: mut_borrow
+        })
+    }
 }
 
 impl<'a, T: ?Sized> Deref for VecRefMut<'a, T> {
