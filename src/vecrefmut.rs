@@ -60,27 +60,6 @@ impl<'a, T: ?Sized> VecRefMut<'a, T> {
         &*self.value
     }
 
-    /// Returns a mutable reference to the borrowed value.
-    /// The reference may not outlive this `VecRefMut` instance.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use veccell::*;
-    /// let mut vec: VecCell<String> = VecCell::new();
-    ///
-    /// vec.push(String::from("hello"));
-    /// vec.push(String::from("world"));
-    ///
-    /// let mut guard = vec.borrow_mut(0).unwrap();
-    /// let hello = std::mem::replace(guard.get_mut(), String::from("potato"));
-    /// assert_eq!(guard.get(), "potato");
-    /// assert_eq!(hello, "hello");
-    /// ```
-    pub fn get_mut(&mut self) -> &mut T {
-        &mut *self.value
-    }
-
     /// Transforms a `VecRefMut<'_, T>` into a `VecRefMut<'_, U>` from a function that maps `&mut T` to `&mut U`.
     ///
     /// This function does not use `self` and must be called explicitly via `VecRefMut::map(value, function)`.
@@ -144,11 +123,18 @@ impl<'a> Drop for VecRefMutBorrow<'a> {
     }
 }
 
-impl<'a, T: Debug + Sized> Debug for VecRefMut<'a, T> {
+
+impl<'a, T: Debug + ?Sized> Debug for VecRefMut<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("VecRefMut")
-            .field(self.value)
+            .field(&self.value)
             .finish()
+    }
+}
+
+impl<'a, T: Display + ?Sized> Display for VecRefMut<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <T as Display>::fmt(&self.value, f)
     }
 }
 

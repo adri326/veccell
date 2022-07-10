@@ -7,6 +7,21 @@ use std::ops::RangeBounds;
 ///
 /// When an instance of `VecRef` is created, the immutable borrow counter of its parent [`VecCell`] is incremented.
 /// Once that instance is [`Drop`ped](Drop), the immutable borrow counter is decremented.
+///
+/// This type implements [`Deref`], and this is the main way to access the contained value:
+///
+/// ```
+/// # use veccell::*;
+/// let mut vec: VecCell<usize> = VecCell::new();
+/// vec.push(2);
+/// vec.push(15);
+///
+/// let vec_ref: VecRef<usize> = vec.borrow(0).unwrap();
+///
+/// let value: usize = *vec_ref; // equivalent to `vec_ref.deref()`
+///
+/// assert_eq!(value, 2);
+/// ```
 #[derive(Clone)]
 pub struct VecRef<'a, T: ?Sized> {
     borrows: VecRefBorrow<'a>,
@@ -103,27 +118,6 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
         }
     }
 
-    // /// Returns a reference to the borrowed value.
-    // /// Equivalent to `&*vec_ref`.
-    // ///
-    // /// The reference may not outlive this `VecRef` instance.
-    // ///
-    // /// # Example
-    // ///
-    // /// ```
-    // /// # use veccell::*;
-    // /// let mut vec: VecCell<String> = VecCell::new();
-    // ///
-    // /// vec.push(String::from("hello"));
-    // /// vec.push(String::from("world"));
-    // ///
-    // /// let guard = vec.borrow(0).unwrap();
-    // /// assert_eq!(guard.get(), "hello");
-    // /// ```
-    // pub fn get(&self) -> &T {
-    //     &*self.value
-    // }
-
     /// Transforms a `VecRef<'_, T>` into a `VecRef<'_, U>` from a function that maps `&T` to `&U`.
     ///
     /// This function does not use `self` and must be called explicitly via `VecRef::map(value, function)`.
@@ -158,8 +152,27 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
 
     /// Variant of [`VecRef::map`], where the callback (`f`) may fail.
     ///
-    /// `f` must return a `Result`; if it returns `Ok(x)`, then `try_map` returns `Ok(VecRef(x))`.
+    /// `f` must return a [`Result`]; if it returns `Ok(x)`, then `try_map` returns `Ok(VecRef(x))`.
     /// Otherwise, it returns `Err(err)`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let vec: VecCell<Option<usize>> = VecCell::from(vec![Some(3), None]);
+    ///
+    /// let ref_number: VecRef<Option<usize>> = vec.borrow(0).unwrap();
+    /// // Note: VecRef::try_map uses `Result`s, but we need `Option`s, so we convert to and from them
+    /// let ref_number: Option<VecRef<usize>> = VecRef::try_map(
+    ///     ref_number,
+    ///     |option| option.as_ref().ok_or(())
+    /// ).ok();
+    /// assert!(ref_number.is_some());
+    ///
+    /// let ref_none = vec.borrow(1).unwrap();
+    /// let ref_none = VecRef::try_map(ref_none, |option| option.as_ref().ok_or(())).ok();
+    /// assert!(ref_none.is_none());
+    /// ```
     pub fn try_map<'b, U: ?Sized, F, E>(original: VecRef<'b, T>, f: F) -> Result<VecRef<'b, U>, E>
     where
         F: FnOnce(&T) -> Result<&U, E>
@@ -171,6 +184,23 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
 impl<'a, T: Sized> VecRef<'a, [T]> {
     /// Returns an immutable borrow to the `index`-th element of the array.
     /// Returns `None` if `index` is out of bounds.
+    ///
+    /// This method is only available for `VecRef<[T]>`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::with_capacity(10);
+    /// for x in 0..10 {
+    ///     vec.push(x);
+    /// }
+    ///
+    /// let range = vec.borrow_range(2..5).unwrap();
+    /// assert_eq!(range.len(), 3);
+    /// let elem = range.borrow(2).unwrap(); // Corresponds to element 4 of `vec`
+    /// assert_eq!(elem, 4);
+    /// ```
     pub fn borrow(&self, index: usize) -> Option<VecRef<'a, T>> {
         Some(VecRef::from(self.value.get(index)?, self.borrows.clone()))
     }
@@ -179,16 +209,25 @@ impl<'a, T: Sized> VecRef<'a, [T]> {
 impl<'a, T: ?Sized> Deref for VecRef<'a, T> {
     type Target = T;
 
+    /// Dereferences the [`VecRef`], returning a reference to the borrowed value.
+    ///
+    /// This cannot fail, as the borrowed value is already immutably borrowed.
     fn deref(&self) -> &Self::Target {
         self.value
     }
 }
 
-impl<'a, T: Debug + Sized> Debug for VecRef<'a, T> {
+impl<'a, T: Debug + ?Sized> Debug for VecRef<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("VecRef")
-            .field(self.value)
+            .field(&self.value)
             .finish()
+    }
+}
+
+impl<'a, T: Display + ?Sized> Display for VecRef<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <T as Display>::fmt(&self.value, f)
     }
 }
 

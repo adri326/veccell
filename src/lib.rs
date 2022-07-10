@@ -16,7 +16,7 @@
 //! - You need to share the array across multiple threads *(you may use `Vec<Mutex<T>>` or `Arc<Vec<Mutex<T>>>` instead)*
 
 use std::cell::{Cell, UnsafeCell};
-use std::fmt::{self, Debug};
+use std::fmt::{self, Debug, Display};
 use std::ops::{Deref, DerefMut};
 
 mod vecref;
