@@ -18,12 +18,13 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
     ///
     /// If `Some(self)` is returned, then:
     /// - no mutable reference exist to `*self`
-    /// - `∀ t: min('a, 'self)`, no new mutable reference can be made to `*self`
+    /// - `∀ t: min('a, 'self)`, no new mutable reference can be made to `*self` during `'t`
     pub(crate) fn new(vec: &'a VecCell<T>, index: usize) -> Option<Self>
     where
         T: Sized
     {
         if vec.mut_borrow.get() == Some(index) {
+            // `vec[index]` is already borrowed mutably, return None
             return None
         }
 
@@ -34,9 +35,64 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
         Some(Self {
             borrows: VecRefBorrow::new(&vec.borrows)?,
             value: unsafe {
-                // SAFETY: there are no mutable borrows of vec.inner[index]
+                // SAFETY: there are no mutable borrows of vec.inner[index] (from vec.mut_borrow == None)
                 vec.get_unchecked(index)
             }
+        })
+    }
+
+    pub(crate) fn from_range<R: RangeBounds<usize>>(vec: &'a VecCell<T>, range: R) -> Option<VecRef<'a, [T]>>
+    where
+        T: Sized
+    {
+        use std::mem::{size_of, align_of};
+
+        match vec.mut_borrow() {
+            Some(index) => {
+                if range.contains(&index) {
+                    // There is a mutable borrow to an index within the range, return None
+                    return None;
+                }
+            },
+            None => {}
+        }
+
+        let low = range.start_bound().cloned();
+        let high = range.end_bound().cloned();
+
+        let range: &[UnsafeCell<T>] = &vec.inner[(low, high)];
+        let range: &[T] = unsafe {
+            let ptr: *const UnsafeCell<T> = range.as_ptr();
+            let len = range.len();
+
+            assert!(ptr as *const () == UnsafeCell::raw_get(ptr) as *const ());
+            assert!(size_of::<UnsafeCell<T>>() == size_of::<T>());
+            assert!(align_of::<UnsafeCell<T>>() == align_of::<T>());
+
+            // SAFETY:
+            // - ptr is a valid pointer
+            // - there are no mutable reference to any element within (low, high)
+            // - ptr == old(ptr), since UnsafeCell has repr(transparent) (also asserted)
+            let ptr: *mut T = UnsafeCell::raw_get(ptr);
+            let ptr = ptr as *const T;
+
+            // SAFETY:
+            // - `ptr` is a valid pointer
+            // - `ptr` points to an array of `len` elements of type `UnsafeCell<T>`
+            // - UnsafeCell has repr(transparent)
+            // - size_of(UnsafeCell<T>) == size_of(T)
+            // - align_of(UnsafeCell<T>) == align_of(T)
+            // - thus, [UnsafeCell<T>] and [T] have the same representation in memory
+            // - thus, ptr points to an array of `len` elements of type `T`
+            // - there are no mutable reference to any element of `slice`
+            let slice: &[T] = std::slice::from_raw_parts(ptr, len);
+
+            slice
+        };
+
+        Some(VecRef {
+            borrows: VecRefBorrow::new(&vec.borrows)?,
+            value: range,
         })
     }
 
@@ -47,26 +103,26 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
         }
     }
 
-    /// Returns a reference to the borrowed value.
-    /// Equivalent to `&*vec_ref`.
-    ///
-    /// The reference may not outlive this `VecRef` instance.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use veccell::*;
-    /// let mut vec: VecCell<String> = VecCell::new();
-    ///
-    /// vec.push(String::from("hello"));
-    /// vec.push(String::from("world"));
-    ///
-    /// let guard = vec.borrow(0).unwrap();
-    /// assert_eq!(guard.get(), "hello");
-    /// ```
-    pub fn get(&self) -> &T {
-        &*self.value
-    }
+    // /// Returns a reference to the borrowed value.
+    // /// Equivalent to `&*vec_ref`.
+    // ///
+    // /// The reference may not outlive this `VecRef` instance.
+    // ///
+    // /// # Example
+    // ///
+    // /// ```
+    // /// # use veccell::*;
+    // /// let mut vec: VecCell<String> = VecCell::new();
+    // ///
+    // /// vec.push(String::from("hello"));
+    // /// vec.push(String::from("world"));
+    // ///
+    // /// let guard = vec.borrow(0).unwrap();
+    // /// assert_eq!(guard.get(), "hello");
+    // /// ```
+    // pub fn get(&self) -> &T {
+    //     &*self.value
+    // }
 
     /// Transforms a `VecRef<'_, T>` into a `VecRef<'_, U>` from a function that maps `&T` to `&U`.
     ///
@@ -112,6 +168,14 @@ impl<'a, T: ?Sized> VecRef<'a, T> {
     }
 }
 
+impl<'a, T: Sized> VecRef<'a, [T]> {
+    /// Returns an immutable borrow to the `index`-th element of the array.
+    /// Returns `None` if `index` is out of bounds.
+    pub fn borrow(&self, index: usize) -> Option<VecRef<'a, T>> {
+        Some(VecRef::from(self.value.get(index)?, self.borrows.clone()))
+    }
+}
+
 impl<'a, T: ?Sized> Deref for VecRef<'a, T> {
     type Target = T;
 
@@ -130,13 +194,13 @@ impl<'a, T: Debug + Sized> Debug for VecRef<'a, T> {
 
 impl<'a, T: PartialEq + ?Sized> PartialEq for VecRef<'a, T> {
     fn eq(&self, other: &Self) -> bool {
-        self.get() == other.get()
+        self.value == other.value
     }
 }
 
 impl<'a, T: PartialEq + ?Sized> PartialEq<T> for VecRef<'a, T> {
     fn eq(&self, other: &T) -> bool {
-        self.get() == other
+        self.value == other
     }
 }
 
@@ -160,136 +224,5 @@ impl<'a> Drop for VecRefBorrow<'a> {
     fn drop(&mut self) {
         debug_assert!(self.0.get() > 0, "Borrow count was null yet there was still a borrow!");
         self.0.set(self.0.get() - 1);
-    }
-}
-
-/// Represents an immutable slice for a [`VecCell`].
-///
-/// # Guarantees
-///
-/// All of the elements of the VecRange are guaranteed to only be borrowed immutably.
-pub struct VecRange<'a, T> {
-    borrows: VecRefBorrow<'a>,
-    range: &'a [UnsafeCell<T>],
-}
-
-impl<'a, T> VecRange<'a, T> {
-    /// # Guarantees
-    ///
-    /// If `Some(self)` is returned, then:
-    /// - no mutable reference exist to `∀ x ∈ self.range`
-    /// - `∀ t ∈ min('a, 'self), ∀ x ∈ self.range`, no mutable borrow can be made to `x`
-    pub(crate) fn new<R: RangeBounds<usize>>(vec: &'a VecCell<T>, range: R) -> Option<VecRange<'a, T>>
-    where
-        T: Sized
-    {
-        match vec.mut_borrow() {
-            Some(index) => {
-                if range.contains(&index) {
-                    return None; // There is still a mutable borrow to an index within the range
-                }
-            },
-            None => {}
-        }
-
-        let low = range.start_bound().cloned();
-        let high = range.end_bound().cloned();
-
-        Some(VecRange {
-            borrows: VecRefBorrow::new(&vec.borrows)?,
-            range: &vec.inner[(low, high)],
-        })
-    }
-
-    /// Returns an immutable reference to the `index`-th element of the slice, if it is within bounds.
-    ///
-    /// The reference may not outlive this instance of `VecRange`.
-    pub fn get<'b>(&'b self, index: usize) -> Option<&'b T> where 'a: 'b {
-        let elem = self.range.get(index)?;
-        Some(unsafe {
-            // SAFETY: VecRange's type invariants guarantee that no mutable reference to self.range[index] exist now
-            // elem.get() is a valid pointer
-            // ('a: 'b) -> the &'b T reference cannot outlive 'a
-            // (self.borrows: VecRefBorrow<'a>) -> no new mutable reference can be made for 'b to self.range[index]
-            elem.get().as_ref().unwrap()
-        })
-    }
-
-    /// Returns an immutable borrow to the `index`-th element of the slice, if it is within bounds.
-    ///
-    /// The returned [`VecRef`] increments the immutable reference counter of the parent [`VecCell`].
-    pub fn borrow(self: &VecRange<'a, T>, index: usize) -> Option<VecRef<'a, T>> {
-        let VecRange { borrows, range } = self.clone();
-        let elem = range.get(index)?;
-
-        Some(unsafe {
-            // SAFETY: VecRange's type invariants guarantee that no mutable reference to self.range[index] exist now
-            // elem.get() is a valid pointer
-            // borrows: VecRefBorrow<'a>, thus under VecRef's invariants, no access beyond 'a to elem can be made
-            VecRef::from(elem.get().as_ref().unwrap(), borrows)
-        })
-    }
-
-    pub fn len(&self) -> usize {
-        self.range.len()
-    }
-}
-
-// TODO: use std::mem::transmute to implement From<VecRange<'a, T>> for VecRef<'a, [T]>?
-impl<'a, T> From<VecRange<'a, T>> for VecRef<'a, [UnsafeCell<T>]> {
-    fn from(range: VecRange<'a, T>) -> Self {
-        Self {
-            borrows: range.borrows,
-            value: range.range, // :3
-        }
-    }
-}
-
-impl<'a, T> std::ops::Index<usize> for VecRange<'a, T> {
-    type Output = T;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        match self.get(index) {
-            Some(elem) => elem,
-            None => panic!("Index out of bounds: len is {} but index is {}", self.len(), index)
-        }
-    }
-}
-
-impl<'a, T> Clone for VecRange<'a, T> {
-    /// The data pointed to by VecRange is already borrows immutably, so it can be safely cloned.
-    fn clone(&self) -> Self {
-        Self {
-            borrows: self.borrows.clone(),
-            range: self.range,
-        }
-    }
-}
-
-impl<'a, T> IntoIterator for VecRange<'a, T> {
-    type Item = &'a T;
-    type IntoIter = VecRangeIter<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        VecRangeIter {
-            iter: self.range.iter()
-        }
-    }
-}
-
-pub struct VecRangeIter<'a, T> {
-    iter: std::slice::Iter<'a, UnsafeCell<T>>,
-}
-
-impl<'a, T> Iterator for VecRangeIter<'a, T> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|x| {
-            unsafe {
-                // SAFETY: immutability is guaranteed by VecRange's type invariants
-                x.get().as_ref().unwrap()
-            }
-        })
     }
 }

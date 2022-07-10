@@ -20,7 +20,7 @@ use std::fmt::{self, Debug};
 use std::ops::{Deref, DerefMut};
 
 mod vecref;
-pub use vecref::{VecRef, VecRange, VecRangeIter};
+pub use vecref::VecRef;
 
 mod vecrefmut;
 pub use vecrefmut::VecRefMut;
@@ -65,7 +65,7 @@ pub use vecrefmut::VecRefMut;
 ///     let prev = vec.borrow(index - 1).unwrap();
 ///
 ///     // Give both references to update
-///     update(current.get_mut(), prev.get());
+///     update(&mut *current, &*prev);
 /// }
 ///
 /// assert_eq!(vec, vec![0, 1, 3, 6, 10, 15, 21, 28, 36, 45]);
@@ -353,8 +353,8 @@ impl<T> VecCell<T> {
     ///
     /// let s = vec.borrow_range(0..2).unwrap(); // Gets elements 0 and 1
     /// ```
-    pub fn borrow_range<'b, R: std::ops::RangeBounds<usize>>(&'b self, range: R) -> Option<VecRange<'b, T>> {
-        VecRange::new(self, range)
+    pub fn borrow_range<'b, R: std::ops::RangeBounds<usize>>(&'b self, range: R) -> Option<VecRef<'b, [T]>> {
+        VecRef::from_range(self, range)
     }
 
     /// Borrows the `index`-th element mutably, if it exists and no mutable *or immutable* borrow are active.
@@ -587,7 +587,7 @@ impl<T: fmt::Debug> fmt::Debug for VecCell<T> {
         impl<T: Debug> fmt::Debug for BorrowStatus<VecRef<'_, T>> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self {
-                    BorrowStatus::Ok(x) => fmt::Debug::fmt(x.get(), f),
+                    BorrowStatus::Ok(x) => fmt::Debug::fmt(&*x, f),
                     BorrowStatus::Borrowed => write!(f, "(borrowed)"),
                 }
             }

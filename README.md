@@ -43,10 +43,10 @@ let first = arr.borrow(0).unwrap(); // Borrow the first element immutably
 
 *third *= *first; // Multiply the third element by the first element
 
-println!("{}", third.get()); // Prints 64
+println!("{}", &*third); // Prints 64
 std::mem::drop(third); // Drop the mutable borrow
 
-println!("{}", arr.borrow(2).unwrap().get()); // Also prints 64
+println!("{}", *arr.borrow(2).unwrap()); // Also prints 64
 ```
 
 However, to prevent aliasing, while an element is borrowed mutably, it cannot be borrowed immutably:
