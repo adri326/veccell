@@ -352,6 +352,9 @@ impl<T> VecCell<T> {
     /// vec.push(3);
     ///
     /// let s = vec.borrow_range(0..2).unwrap(); // Gets elements 0 and 1
+    /// assert_eq!(s[0], 1);
+    /// assert_eq!(s[1], 2);
+    /// assert!(s.get(2).is_none());
     /// ```
     pub fn borrow_range<'b, R: std::ops::RangeBounds<usize>>(&'b self, range: R) -> Option<VecRef<'b, [T]>> {
         VecRef::from_range(self, range)
