@@ -22,7 +22,7 @@ Run `cargo add veccell` or add the following in `Cargo.toml`:
 
 ```toml
 [dependencies]
-veccell = "0.1.0"
+veccell = "0.4"
 ```
 
 ## Examples
@@ -103,6 +103,15 @@ let first = arr.borrow_mut(0);
 
 // VecCell can only allow one mutable borrow at a time
 assert!(arr.borrow_mut(1).is_none());
+```
+
+## serde
+
+`serde` is supported. To use it, enable the `serde` feature:
+
+```toml
+[dependencies]
+veccell = { version = "0.4", features = ["serde"] }
 ```
 
 ## License
