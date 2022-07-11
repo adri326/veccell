@@ -779,6 +779,28 @@ impl<T> From<VecCell<T>> for Vec<T> {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<T: serde::Serialize> serde::Serialize for VecCell<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer
+    {
+        let range = self.borrow_range(..).expect("Cannot borrow immutably VecCell: already borrowed mutably.");
+        (*range).serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for VecCell<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>
+    {
+        let vec: Vec<T> = Vec::deserialize(deserializer)?;
+        Ok(Self::from(vec))
+    }
+}
+
 #[cfg(test)]
 mod test;
 

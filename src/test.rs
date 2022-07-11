@@ -296,3 +296,26 @@ fn test_try_map() {
     assert!(borrow.is_ok());
     assert_eq!(borrow.unwrap(), -6);
 }
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_serde() {
+    let mut vec: VecCell<usize> = VecCell::new();
+
+    vec.push(2);
+    vec.push(5);
+
+    let range = vec.borrow_range(..);
+
+    let s: String = serde_json::to_string(&vec).unwrap();
+
+    assert_eq!(serde_json::from_str::<Vec<usize>>(&s).unwrap(), vec![2, 5]);
+
+    let new_vec: VecCell<usize> = serde_json::from_str(&s).unwrap();
+
+    assert_eq!(new_vec.len(), 2);
+    assert_eq!(new_vec.borrows(), 0);
+    drop(range);
+    assert!(new_vec.mut_borrow().is_none());
+    assert_eq!(new_vec, vec![2, 5]);
+}
