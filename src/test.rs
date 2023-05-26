@@ -19,7 +19,6 @@ fn test_create_vec() {
     assert_eq!(vec.len(), 0);
     assert_eq!(vec.capacity(), usize::MAX);
 
-
     let vec: VecCell<usize> = VecCell::with_capacity(0);
     assert_eq!(vec.len(), 0);
     assert_eq!(vec.capacity(), 0);
@@ -29,6 +28,21 @@ fn test_create_vec() {
     let vec: VecCell<()> = VecCell::with_capacity(0);
     assert_eq!(vec.len(), 0);
     assert_eq!(vec.capacity(), usize::MAX);
+}
+
+#[test]
+fn test_default_vec() {
+    let container: Container<usize> = Container::default();
+    assert_eq!(container.vec.len(), 0);
+    let container: Container<i8> = Container::default();
+    assert_eq!(container.vec.len(), 0);
+    let container: Container<()> = Container::default();
+    assert_eq!(container.vec.len(), 0);
+
+    #[derive(Default)]
+    struct Container<T> {
+        vec: VecCell<T>,
+    }
 }
 
 #[test]
@@ -284,7 +298,8 @@ fn test_try_map() {
     assert!(VecRefMut::try_map(ref_mut, |_value| Err::<&mut (), ()>(())).is_err());
 
     let ref_mut = vec.borrow_mut(5).unwrap();
-    let ref_mut: Result<VecRefMut<'_, i32>, ()> = VecRefMut::try_map(ref_mut, |value| Ok(value.as_mut()));
+    let ref_mut: Result<VecRefMut<'_, i32>, ()> =
+        VecRefMut::try_map(ref_mut, |value| Ok(value.as_mut()));
     assert!(ref_mut.is_ok());
     assert_eq!(ref_mut.unwrap(), -5);
 

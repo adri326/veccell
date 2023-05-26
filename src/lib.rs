@@ -102,7 +102,7 @@ impl<T> VecCell<T> {
         Self {
             mut_borrow: Cell::new(None),
             borrows: Cell::new(0),
-            inner: Vec::with_capacity(capacity)
+            inner: Vec::with_capacity(capacity),
         }
     }
 
@@ -356,7 +356,10 @@ impl<T> VecCell<T> {
     /// assert_eq!(s[1], 2);
     /// assert!(s.get(2).is_none());
     /// ```
-    pub fn borrow_range<'b, R: std::ops::RangeBounds<usize>>(&'b self, range: R) -> Option<VecRef<'b, [T]>> {
+    pub fn borrow_range<'b, R: std::ops::RangeBounds<usize>>(
+        &'b self,
+        range: R,
+    ) -> Option<VecRef<'b, [T]>> {
         VecRef::from_range(self, range)
     }
 
@@ -491,9 +494,7 @@ impl<T> VecCell<T> {
     /// std::mem::drop(x);
     /// ```
     pub fn try_iter<'b>(&'b self) -> impl Iterator<Item = Option<VecRef<'b, T>>> {
-        (0..self.len()).map(|index| {
-            self.borrow(index)
-        })
+        (0..self.len()).map(|index| self.borrow(index))
     }
 
     /// Resets the [`borrows`](VecCell::borrows) and [`mut_borrow`](VecCell::mut_borrow) counters.
@@ -547,7 +548,11 @@ impl<T> VecCell<T> {
     /// If no reference was [forgotten](std::mem::forget), then `mut_borrow == None` and `borrows == 0`.
     #[inline]
     pub fn into_raw_parts(self) -> (Vec<UnsafeCell<T>>, Option<usize>, usize) {
-        (self.inner, self.mut_borrow.into_inner(), self.borrows.into_inner())
+        (
+            self.inner,
+            self.mut_borrow.into_inner(),
+            self.borrows.into_inner(),
+        )
     }
 
     // == Unsafe functions section ==
@@ -571,7 +576,11 @@ impl<T> VecCell<T> {
     }
 
     /// Constructs a `VecCell` from its raw parts.
-    pub unsafe fn from_raw_parts(inner: Vec<UnsafeCell<T>>, mut_borrow: Option<usize>, borrows: usize) -> Self {
+    pub unsafe fn from_raw_parts(
+        inner: Vec<UnsafeCell<T>>,
+        mut_borrow: Option<usize>,
+        borrows: usize,
+    ) -> Self {
         Self {
             inner,
             borrows: Cell::new(borrows),
@@ -599,12 +608,16 @@ impl<T: fmt::Debug> fmt::Debug for VecCell<T> {
         f.debug_struct("VecCell")
             .field("borrows", &self.borrows.get())
             .field("mut_borrow", &self.mut_borrow.get())
-            .field("inner", &self.try_iter().map(|x| {
-                match x {
-                    Some(y) => BorrowStatus::Ok(y),
-                    None => BorrowStatus::Borrowed,
-                }
-            }).collect::<Box<[_]>>())
+            .field(
+                "inner",
+                &self
+                    .try_iter()
+                    .map(|x| match x {
+                        Some(y) => BorrowStatus::Ok(y),
+                        None => BorrowStatus::Borrowed,
+                    })
+                    .collect::<Box<[_]>>(),
+            )
             .finish()
     }
 }
@@ -619,7 +632,7 @@ impl<'a, T: 'a> IntoIterator for &'a VecCell<T> {
     fn into_iter(self) -> Self::IntoIter {
         VecCellRefIter {
             vec: self,
-            index: 0
+            index: 0,
         }
     }
 }
@@ -629,7 +642,7 @@ impl<'a, T: 'a> IntoIterator for &'a VecCell<T> {
 #[derive(Clone)]
 pub struct VecCellRefIter<'a, T> {
     vec: &'a VecCell<T>,
-    index: usize
+    index: usize,
 }
 
 impl<'a, T> Iterator for VecCellRefIter<'a, T> {
@@ -637,12 +650,15 @@ impl<'a, T> Iterator for VecCellRefIter<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.vec.len() {
-            return None
+            return None;
         }
 
         let res = match self.vec.borrow(self.index) {
             Some(x) => x,
-            None => panic!("Error while borrowing immutably element {} of VecCell: already mutably borrowed", self.index),
+            None => panic!(
+                "Error while borrowing immutably element {} of VecCell: already mutably borrowed",
+                self.index
+            ),
         };
         self.index += 1;
 
@@ -681,7 +697,7 @@ impl<T> IntoIterator for VecCell<T> {
     /// Panics if a value is currently mutably borrowed
     fn into_iter(self) -> Self::IntoIter {
         VecCellIntoIter {
-            iter: self.inner.into_iter()
+            iter: self.inner.into_iter(),
         }
     }
 }
@@ -718,7 +734,10 @@ impl<T: Clone> Clone for VecCell<T> {
     /// Panics if a value is currently mutably borrowed
     fn clone(&self) -> Self {
         VecCell {
-            inner: self.into_iter().map(|x| UnsafeCell::new((*x).clone())).collect::<Vec<_>>(),
+            inner: self
+                .into_iter()
+                .map(|x| UnsafeCell::new((*x).clone()))
+                .collect::<Vec<_>>(),
             mut_borrow: Cell::new(None),
             borrows: Cell::new(0),
         }
@@ -731,12 +750,12 @@ impl<T: PartialEq> PartialEq for VecCell<T> {
     /// Panics if a value in `self` or `other` is currently mutably borrowed when it is encountered in the comparison.
     fn eq(&self, other: &Self) -> bool {
         if self.len() != other.len() {
-            return false
+            return false;
         }
 
         for (s, o) in self.iter().zip(other.iter()) {
             if *s != *o {
-                return false
+                return false;
             }
         }
 
@@ -750,12 +769,12 @@ impl<T: PartialEq> PartialEq<Vec<T>> for VecCell<T> {
     /// Panics if a value in `self` is currently mutably borrowed when it is encountered in the comparison.
     fn eq(&self, other: &Vec<T>) -> bool {
         if self.len() != other.len() {
-            return false
+            return false;
         }
 
         for (s, o) in self.iter().zip(other.iter()) {
             if *s != *o {
-                return false
+                return false;
             }
         }
 
@@ -766,7 +785,10 @@ impl<T: PartialEq> PartialEq<Vec<T>> for VecCell<T> {
 impl<T> From<Vec<T>> for VecCell<T> {
     fn from(vec: Vec<T>) -> Self {
         VecCell {
-            inner: vec.into_iter().map(|x| UnsafeCell::new(x)).collect::<Vec<_>>(),
+            inner: vec
+                .into_iter()
+                .map(|x| UnsafeCell::new(x))
+                .collect::<Vec<_>>(),
             mut_borrow: Cell::new(None),
             borrows: Cell::new(0),
         }
@@ -783,9 +805,11 @@ impl<T> From<VecCell<T>> for Vec<T> {
 impl<T: serde::Serialize> serde::Serialize for VecCell<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer
+        S: serde::Serializer,
     {
-        let range = self.borrow_range(..).expect("Cannot borrow immutably VecCell: already borrowed mutably.");
+        let range = self
+            .borrow_range(..)
+            .expect("Cannot borrow immutably VecCell: already borrowed mutably.");
         (*range).serialize(serializer)
     }
 }
@@ -794,10 +818,17 @@ impl<T: serde::Serialize> serde::Serialize for VecCell<T> {
 impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for VecCell<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>
+        D: serde::Deserializer<'de>,
     {
         let vec: Vec<T> = Vec::deserialize(deserializer)?;
         Ok(Self::from(vec))
+    }
+}
+
+impl<T> Default for VecCell<T> {
+    #[inline(always)]
+    fn default() -> Self {
+        VecCell::new()
     }
 }
 
