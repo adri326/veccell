@@ -16,6 +16,7 @@
 //! - You need to share the array across multiple threads *(you may use `Vec<Mutex<T>>` or `Arc<Vec<Mutex<T>>>` instead)*
 
 use std::cell::{Cell, UnsafeCell};
+use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display};
 use std::ops::{Deref, DerefMut};
 
@@ -556,6 +557,125 @@ impl<T> VecCell<T> {
     }
 
     // == Unsafe functions section ==
+
+    /// Sorts the vector, but might not preserve the order of equal elements.
+    ///
+    /// This sort uses the same implementation as `[T]::sort_unstable_by`.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(30);
+    /// vec.push(0);
+    /// vec.push(20);
+    /// vec.push(10);
+    ///
+    /// vec.sort_unstable();
+    ///
+    /// assert_eq!(vec.borrow(0).unwrap(), 0);
+    /// assert_eq!(vec.borrow(1).unwrap(), 10);
+    /// assert_eq!(vec.borrow(2).unwrap(), 20);
+    /// assert_eq!(vec.borrow(3).unwrap(), 30);
+    /// ```
+    pub fn sort_unstable(&mut self)
+    where
+        T: Ord,
+    {
+        self.sort_unstable_by(|a, b| a.cmp(b))
+    }
+
+    /// Sorts the vector with a comparator function, but might not preserve the order of
+    /// equal elements.
+    ///
+    /// This sort uses the same implementation as `[T]::sort_unstable_by`.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<usize> = VecCell::new();
+    ///
+    /// vec.push(30);
+    /// vec.push(0);
+    /// vec.push(20);
+    /// vec.push(10);
+    ///
+    /// vec.sort_unstable_by(|a, b| b.cmp(a));
+    ///
+    /// assert_eq!(vec.borrow(0).unwrap(), 30);
+    /// assert_eq!(vec.borrow(1).unwrap(), 20);
+    /// assert_eq!(vec.borrow(2).unwrap(), 10);
+    /// assert_eq!(vec.borrow(3).unwrap(), 0);
+    /// ```
+    pub fn sort_unstable_by<F>(&mut self, mut compare: F)
+    where
+        T: Ord,
+        F: FnMut(&T, &T) -> Ordering,
+    {
+        assert_eq!(
+            self.borrows.get(),
+            0,
+            "Sorting requires that no item is currently borrowed"
+        );
+        assert!(
+            self.mut_borrow.get().is_none(),
+            "Sorting requires that no item is currently (mutably) borrowed"
+        );
+        self.inner.sort_unstable_by(|a, b| {
+            // SAFETY: self is borrowed mutably and a and b are not itself changed.
+            let a = unsafe { &*a.get() };
+            let b = unsafe { &*b.get() };
+            compare(a, b)
+        });
+    }
+
+    /// Sorts the vector with a key extraction function, but might not preserve the order of
+    /// equal elements.
+    ///
+    /// This sort uses the same implementation as `[T]::sort_unstable_by_key`.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use veccell::*;
+    /// let mut vec: VecCell<isize> = VecCell::new();
+    ///
+    /// vec.push(30);
+    /// vec.push(0);
+    /// vec.push(20);
+    /// vec.push(10);
+    ///
+    /// vec.sort_unstable_by_key(|a| -(*a));
+    ///
+    /// assert_eq!(vec.borrow(0).unwrap(), 30);
+    /// assert_eq!(vec.borrow(1).unwrap(), 20);
+    /// assert_eq!(vec.borrow(2).unwrap(), 10);
+    /// assert_eq!(vec.borrow(3).unwrap(), 0);
+    /// ```
+    pub fn sort_unstable_by_key<K, F>(&mut self, mut f: F)
+    where
+        F: FnMut(&T) -> K,
+        K: Ord,
+    {
+        assert_eq!(
+            self.borrows.get(),
+            0,
+            "Sorting requires that no item is currently borrowed"
+        );
+        assert!(
+            self.mut_borrow.get().is_none(),
+            "Sorting requires that no item is currently (mutably) borrowed"
+        );
+        self.inner.sort_unstable_by(|a, b| {
+            // SAFETY: self is borrowed mutably and a and b are not itself changed.
+            let a = f(unsafe { &*a.get() });
+            let b = f(unsafe { &*b.get() });
+            a.cmp(&b)
+        });
+    }
 
     /// Alternative to `get`, which skips all checks and returns a mutable reference.
     /// Neither the `mut_borrow`, nor the `borrows` buffer will be updated or read,
